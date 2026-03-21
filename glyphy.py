@@ -11,8 +11,9 @@
 #        License: GNU GPL-3.0
 #
 #         GitHub: https://github.com/olivierflying747-8/Glyphy
-#           Docs: Link TBA
+#           Docs: https://crucible.hubbe.net/t/project-glyphy-a-visualizer-validator-tool-for-proffieos-text-font-files/7777
 #    Instalation: https://github.com/olivierflying747-8/Glyphy/blob/main/InstallationGuide/InstallationGuide.md
+#  Report Errors: see Docs and/or Github
 #
 # ==================================================
 # What this file does:
@@ -74,8 +75,8 @@ EXTRA_GLYPH_SPACING   = 5       # Extra spacing added to GLYPHDATA advance when 
 USE_Y_OFFSET          = True    # Apply GLYPHDATA y_offset vertically. Must be True to match ProffieOS rendering exactly.
                                 # Set False to ignore vertical offsets for debugging or logo design.
 
-WIDTH_MODE = "glyphdata"      # Only used when STRICT_PROFFIE_LAYOUT = False
-# "glyphdata"  → use GLYPHDATA width only
+WIDTH_MODE = "glyphdata"        # Only used when STRICT_PROFFIE_LAYOUT = False
+# "glyphdata"  → use GLYPHDATA advance-width only
 # "bitmap"     → use bitmap width only
 # "max"        → use max(bitmap, GLYPHDATA)
 
@@ -85,14 +86,16 @@ RENDER_MODE = "table"
 # "random"     → to render a glyph in a random .h file (not a font) for example saber_logo.h
 # "this"       → to render THIS
 
-CUSTOM_TEXT = ">h>e>l>l>o\n>t>h>e>r>e"  # If "text" is selected on the line above, add your text here.
+CUSTOM_TEXT = ">h>e>l>l>o\n>t>h>e>r>e"
+                              # If "text" is selected in RENDER_MODE, add your text here.
                               # ProffieOS "\n" is supported and will go to next line.
                               # If your text is too long to fit, it will wrap on multiple lines
                               # or get clipped depending on AUTO_WRAP.
 
-AUTO_WRAP = True              # only meaningful in text mode
+AUTO_WRAP = True              # only meaningful when RENDER_MODE = "text"
 
-LOOK_FOR = "saberLogoLS6"     # Name of the bitmap array to find & display in your random .h file.
+LOOK_FOR = "saberLogoLS6"     # RENDER_MODE = "random"
+                              # Name of the bitmap array to find & display in your random .h file.
                               # For example: from saber_logo.h
                               #              give "saberLogoLS6"
 
@@ -104,14 +107,15 @@ THIS = """
   0b10000000000111UL,
   0b10000000000100UL,
   0b11111111111100UL
-  """                         # "THIS" is an example of a properly formatted ProffieOS glyph.
+  """                         # RENDER_MODE = "this"
+                              # "THIS" is an example of a properly formatted ProffieOS glyph.
                               # Unfortunately Python cannot parse the ProffieOS format "{ 0bXXXUL }" because of
                               # the "UL" suffix, so a string literal (""" 0bXXXUL """) is used here instead.
 
 DISPLAY_WIDTH = 128           # Width of displayable text (before scaling, not including borders) (capped at a minimum of 32)
 
 # --------------------------------------------------
-# Settings for single bitmap array rendering and/or custom text string
+# Settings for single bitmap array rendering and/or custom text string (RENDER_MODE = "text", "random" or "this")
 # --------------------------------------------------
 
 DISPLAY_HEIGHT = 32           # (capped at a minimum of 32)
