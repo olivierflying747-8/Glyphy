@@ -1,9 +1,9 @@
-# version 53
+# version 54
 
 # ==================================================
 # GLYPHY – ProffieOS Text Font Analyzer & Renderer
 # ==================================================
-#        Version: 0.53 beta
+#        Version: 0.54 beta
 #         Author: OlivierFlying747-8
 #
 # Looking for me? https://crucible.hubbe.net
@@ -37,7 +37,7 @@ Quick start:
 """
 """
 ▶ Running GLYPHY
-Navigate to the folder containing glyphy.py. (ProffieOS/display)
+Navigate to the folder containing glyphy.py (ProffieOS/display)
 Right click on the "display" folder in left pane window (Windows Explorer)
 Click on "Open command window here"
 Run:
@@ -170,7 +170,7 @@ FILENAME_MODE = "iterate"      # Select "overwrite" to overwrite previously gene
 FILENAME_ITERATE_RANGE = None  # Use 9, 99 or 999. Default is 99 ( = None )
 AUTO_OPEN_IMAGE        = True  # Opens in your default image viewer
 GENERATE_REPORT        = False # Create a .txt report about your font analysis.
-AUTO_OPEN_REPORT       = False # Opens in your default .txt viewer
+AUTO_OPEN_REPORT       = True  # Opens in your default .txt viewer
 
 OPEN_REPAIR_MENU       = False # Use at your own risk! It should only make changes to cloned fonts.
                                # Menu will only prompt to open, if errors are detected in your font.
@@ -213,6 +213,7 @@ SHOW_LEGEND                = True   # Add a legend area to the bottom of the ren
 # Debug
 # --------------------------------------------------
 ENABLE_DEVELOPER_DEBUG_MODE = False # Adds additional debugging data to the report, the render and/or console output.
+                                    # Also saves "ctx" to file, all 16.000+ lines of it.
 
 FORCE_CORE_BREACH_EVENT     = False # See what happens when you turn this ON, I dare you!
                                     # Intended to only show when geometry is broken regardless of FORCE_CORE_BREACH_EVENT bool value.
@@ -345,6 +346,21 @@ def parse_font_file(filename, dict_btmp_gdat):
   with open(filename, "r", encoding="utf-8") as f:
     raw_content = f.read()
 
+  # ----- build comment ranges (for precise commented detection) -----
+  comment_ranges = []
+
+  for m in RE_BLOCK_COMMENT.finditer(raw_content):
+    comment_ranges.append((m.start(), m.end()))
+
+  for m in RE_LINE_COMMENT.finditer(raw_content):
+    comment_ranges.append((m.start(), m.end()))
+
+  def is_position_commented(pos, ranges):
+    for start, end in ranges:
+      if start <= pos < end:
+        return True
+    return False
+
   # remove comments for active-content parsing
   content_no_comments = RE_BLOCK_COMMENT.sub("", raw_content)
   content_no_comments = RE_LINE_COMMENT.sub("", content_no_comments)
@@ -393,7 +409,7 @@ def parse_font_file(filename, dict_btmp_gdat):
     version = {
       "body": body,
       "uint_declared": int(uint_declared),
-      "is_commented": full_name not in content_no_comments,
+      "is_commented": is_position_commented(match.start(), comment_ranges),
       "full_name": full_name,
       "line": raw_content.count("\n", 0, match.start()) + 1
     }
@@ -416,7 +432,7 @@ def parse_font_file(filename, dict_btmp_gdat):
       "advance_width": int(advance_width),
       "x_offset": int(x_offset),
       "y_offset": int(y_offset),
-      "is_commented": full_name not in content_no_comments,
+      "is_commented": is_position_commented(match.start(), comment_ranges),
       "name": full_name,
       "line": raw_content.count("\n", 0, match.start()) + 1
     }
@@ -536,6 +552,7 @@ def parse_font_file(filename, dict_btmp_gdat):
     elif active_bitmap_count > 1:
       active_lines = [str(v["line"]) for v in bitmap_versions if not v["is_commented"]]
       commented_lines = [str(v["line"]) for v in bitmap_versions if v["is_commented"]]
+      # I know, I know. It should say "mismatched" but I like "mishmash" better!
       errors.append(f"[ERROR] bitmap definition mishmash ({active_bitmap_count} active + {commented_bitmap_count} commented")
       errors.append(f"  active lines: {', '.join(active_lines)}; commented lines: {', '.join(commented_lines)})")
       char_critical = True
@@ -639,7 +656,96 @@ def parse_font_file(filename, dict_btmp_gdat):
         if len(unique) > 1:
           errors.append(f"[WARNING] bitmap is not rectangular (row lengths: {unique})")
           errors.append(f"  line: {version['line']}")
-          errors.append("  suggestion: add or remove zeros to make rows equal")
+          #errors.append("  suggestion: add or remove zeros to make rows equal")
+
+          # ----- determine target length -----
+          max_length = max(unique)
+          min_length = min(unique)
+
+          # ----- check if longest rows can be safely trimmed -----
+          can_trim = True
+
+          for row_bits in rows:
+            if len(row_bits) == max_length:
+              extra_bits = row_bits[min_length:]
+
+              if not all(bit == '0' for bit in extra_bits):
+                can_trim = False
+                break
+
+          # ----- choose normalization strategy -----
+          if can_trim:
+            target_length = min_length
+          else:
+            target_length = max_length
+
+          # ----- helper: number → word -----
+          number_words = {
+            1: "one",
+            2: "two",
+            3: "three",
+            4: "four",
+            5: "five",
+            6: "six",
+            7: "seven",
+            8: "eight",
+            9: "nine",
+            10: "ten",
+            11: "eleven",
+            12: "twelve",
+            13: "thirteen",
+            14: "fourteen",
+            15: "fifteen",
+            16: "sixteen",
+            17: "seventeen",
+            18: "eighteen",
+            19: "nineteen",
+            20: "twenty"
+          }
+
+          def number_to_word(number):
+            return number_words.get(number, str(number))
+
+          # ----- grouping containers -----
+          add_zero_groups = {}     # key = diff, value = list of row numbers
+          remove_zero_groups = {}  # key = diff, value = list of row numbers
+
+          # ----- analyze rows -----
+          for row_index, row_bits in enumerate(rows):
+            row_length = len(row_bits)
+
+            # ----- Case 1: shorter rows → pad -----
+            if row_length < target_length:
+              difference = target_length - row_length
+              add_zero_groups.setdefault(difference, []).append(row_index + 1)
+
+            # ----- Case 2: longer rows → trim ONLY if safe -----
+            elif row_length > target_length:
+              extra_bits = row_bits[target_length:]
+
+              if all(bit == '0' for bit in extra_bits):
+                difference = row_length - target_length
+                remove_zero_groups.setdefault(difference, []).append(row_index + 1)
+
+          # ----- helper: format row list -----
+          def format_row_list(row_numbers):
+            if len(row_numbers) == 1:
+              return f"row {row_numbers[0]}"
+            else:
+              return "rows " + ", ".join(map(str, row_numbers))
+
+          # ----- emit grouped suggestions -----
+          for difference, row_numbers in sorted(add_zero_groups.items()):
+            word = number_to_word(difference)
+            plural = "" if difference == 1 else "s"
+            row_text = format_row_list(row_numbers)
+            errors.append(f"  suggestion: add {word} trailing zero{plural} to {row_text}")
+
+          for difference, row_numbers in sorted(remove_zero_groups.items()):
+            word = number_to_word(difference)
+            plural = "" if difference == 1 else "s"
+            row_text = format_row_list(row_numbers)
+            errors.append(f"  suggestion: delete {word} trailing zero{plural} from {row_text}")
 
         # --------------------------------------------------
         # UINT VALIDATION
@@ -696,6 +802,11 @@ def parse_font_file(filename, dict_btmp_gdat):
       glyph_line,
       errors
     ):
+
+      # ----- skip spatial validation for empty bitmap -----
+      if bitmap_width == 0:
+        return
+
       bitmap_left = x_offset
       bitmap_right = x_offset + bitmap_width
 
@@ -715,7 +826,16 @@ def parse_font_file(filename, dict_btmp_gdat):
       if bitmap_right <= 0 or bitmap_left >= advance_width:
         errors.append("[INFO] bitmap lies completely outside advance width box")
         errors.append(f"  line: {glyph_line}")
-        errors.append("  suggestion: check x_offset and advance_width values")
+        #errors.append("  suggestion: check x_offset and advance_width values")
+        errors.append(f"  note: bitmap spans [{bitmap_left}, {bitmap_right}] while advance width is [0, {advance_width}]")
+        if advance_width == 0:
+          errors.append("  note: advance width is zero, so bitmap will not advance cursor (this may be intentional)"  )
+        elif bitmap_right <= 0:
+          errors.append("  note: bitmap is entirely left of the drawing origin (this may be intentional)")
+          errors.append("  suggestion: increase advance_width or increase x_offset to shift it right")
+        elif bitmap_left >= advance_width:
+          errors.append("  note: bitmap starts beyond the advance width (this may be intentional)")
+          errors.append("  suggestion: decrease x_offset or increase advance_width to bring it into range")
 
     if has_bitmap and has_glyphdata:
       B = len(bitmap_versions)
@@ -3422,7 +3542,7 @@ def open_file(path):
   # ----- macOS -----
   elif system == "Darwin":
     subprocess.run(["open", path])
-  # ----- Linux/Unix -----
+  # ----- Linux / Unix (xdg-open) -----
   else:
     subprocess.run(["xdg-open", path])
 
@@ -3614,7 +3734,7 @@ def write_report_file(
         from datetime import datetime
         now = datetime.now()
 
-        f.write("Generated with GLYPHY version 53\n")
+        f.write("Generated with GLYPHY version 54\n")
         f.write("\n")
         f.write(f"debug System date: {now.strftime('%Y - %m_%b - %d')}\n")
         f.write(f"debug System time: {now.strftime('%H:%M:%S')}\n")
