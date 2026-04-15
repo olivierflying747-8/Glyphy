@@ -1,4 +1,4 @@
-#asciify.py & deasciify.py help you edit a bitmap array in a visual way.
+# asciify.py & deasciify.py help you edit a bitmap array in a visual way.
 
 Usage:<br>
 <br>
@@ -20,7 +20,7 @@ Note:<br>
 <br>
 <br>
 <br>
-#fontconvert.py is identical to ProffieOS/fontconvert/fontconvert.c
+# fontconvert.py is identical to ProffieOS/fontconvert/fontconvert.c
 fontconvert.py will convert a TTF to a .h ProffieOS font
 
 Usage:<br>
@@ -28,7 +28,7 @@ Usage:<br>
 <br>
 <br>
 <br>
-#rotate_flips.py allows to rotate and/or flip a ProffieOS bitmap
+# rotate_flips.py allows to rotate and/or flip a ProffieOS bitmap
 
 Usage:<br>
 <br>
