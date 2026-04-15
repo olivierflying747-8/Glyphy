@@ -1,9 +1,9 @@
-# version 54
+# version 56
 
 # ==================================================
 # GLYPHY – ProffieOS Text Font Analyzer & Renderer
 # ==================================================
-#        Version: 0.54 beta
+#        Version: 0.56 beta
 #         Author: OlivierFlying747-8
 #
 # Looking for me? https://crucible.hubbe.net
@@ -33,7 +33,7 @@
 
 """
 Quick start:
-    python glyphy.py YourFont.h
+  python glyphy.py YourFont.h
 """
 """
 ▶ Running GLYPHY
@@ -118,8 +118,9 @@ DISPLAY_WIDTH = 128           # Width of displayable text (before scaling, not i
 # Settings for single bitmap array rendering and/or custom text string (RENDER_MODE = "text", "random" or "this")
 # --------------------------------------------------
 
-DISPLAY_HEIGHT = 32           # (capped at a minimum of 32)
-DO_BORDERS     = True         # Apply borders to single bitmap array rendering or custom text.
+DISPLAY_HEIGHT = 32               # (capped at a minimum of 32)
+DISPLAY_HEIGHT_HARD_LIMIT = True  # Everything past DISPLAY_HEIGHT will be clipped
+DO_BORDERS     = True             # Apply borders to single bitmap array rendering or custom text.
 
 # --------------------------------------------------
 # GEOMETRY
@@ -129,11 +130,11 @@ OUTER_WHITE_BORDER = 2         # Outer white border thickness (capped at a minim
 INNER_BLACK_BORDER = 3         # Inner black border thickness (for diagnostic, a minimum of 2 is recommended) (capped at a minimum of 0)
 SPACING            = 2         # Vertical spacing between rows (capped at a minimum of 0)
 
-SCALE     = 4                  # Image scaling factor for better visualization (capped at a minimum of 1)
+SCALE           = 4            # Image scaling factor for better visualization (capped at a minimum of 1)
 
-ROTATION   = 0                 # Accepted values: 0, 90, -90, 180 or 270. For ProffieOS, your font should display correctly with 0.
-FLIP_HORIZ = False             # Mirror horizontally (True or False). For ProffieOS, your font should display correctly with False.
-FLIP_VERT  = False             # Mirror vertically (True or False). For ProffieOS, your font should display correctly with False.
+ROTATION        = 0            # Accepted values: 0, 90 (for CW), -90 (for CCW), 180 or 270. For ProffieOS, your font should display correctly with 0.
+FLIP_LEFT_RIGHT = False        # Mirror left to right (True or False). For ProffieOS, your font should display correctly with False.
+FLIP_TOP_BOTTOM = False        # Mirror up to down (True or False). For ProffieOS, your font should display correctly with False.
 
 LABEL_TTF       = "Arial.ttf"  # Name of the TTF font used for labels/legend if it can be found,
                                # otherwise the Python default TTF will be used.
@@ -170,6 +171,7 @@ FILENAME_MODE = "iterate"      # Select "overwrite" to overwrite previously gene
 FILENAME_ITERATE_RANGE = None  # Use 9, 99 or 999. Default is 99 ( = None )
 AUTO_OPEN_IMAGE        = True  # Opens in your default image viewer
 GENERATE_REPORT        = False # Create a .txt report about your font analysis.
+FORCE_DETAILS          = True  # Adds character details regardless of errors/warnings detected.
 AUTO_OPEN_REPORT       = True  # Opens in your default .txt viewer
 
 OPEN_REPAIR_MENU       = False # Use at your own risk! It should only make changes to cloned fonts.
@@ -182,6 +184,9 @@ OPEN_REPAIR_MENU       = False # Use at your own risk! It should only make chang
 SHOW_COMMENTED         = True   # Parse commented glyph arrays (True or False). ProffieOS will ignore commented bitmap glyphs.
 SHOW_LABEL             = True   # Add a character label under your glyphs.
                                 # Labels will only be shown in RENDER_MODE = "table".
+LABEL_NUMBERING        = True   # Multiple glyph versions will get a number added to their labels
+LABEL_INCREMENT        = False  # Label numbering will increment when True / decrement when False
+LABEL_START            = 0      # Label start position (1 to start at 1 / 0 to start at 0)
 
 DRAW_MISSING_BLOCK     = True   # To draw missing characters block (red)
 FALLBACK_GLYPH_WIDTH   = 5      # Default width of missing characters
@@ -606,7 +611,7 @@ def parse_font_file(filename, dict_btmp_gdat):
 
           # ----- detect missing comma between multiple binary rows -----
           if len(binary_matches) > 1:
-            # collapse whitespace to detect separation without commas
+            # ----- collapse whitespace to detect separation without commas -----
             normalized = re.sub(r"\s+", " ", clean_body.strip())
 
             if "," not in normalized:
@@ -760,10 +765,12 @@ def parse_font_file(filename, dict_btmp_gdat):
             required = 8
           elif height <= 16:
             required = 16
-          else:
+          elif height <= 32:
             required = 32
+          else:
+            required = 64
 
-          # ----- store correct uint for repair system ------
+          # ----- store correct uint for repair system -----
           version["correct_uint"] = required
 
           # ----- Invalid uint type -----
@@ -908,10 +915,39 @@ def parse_font_file(filename, dict_btmp_gdat):
           errors.append(f"[INFO] {G - pair_count} glyphdata version(s) have no matching bitmap")
           errors.append(f"  lines: {', '.join(extra_lines)}")
 
+    if FORCE_DETAILS:
+      note_lines = []
+
+      # ----- REAL (measured) bitmap -----
+      real_height = bitmap_height if has_bitmap else 0
+      real_width = bitmap_width if has_bitmap else 0
+
+      # ----- DECLARED height (uintXX_t) -----
+      declared_height = None
+      if primary_bitmap:
+        declared_height = primary_bitmap.get("uint_declared")
+
+      # ----- GLYPHDATA -----
+      if primary_glyphdata:
+        y_offset = primary_glyphdata["y_offset"]
+        x_offset = primary_glyphdata["x_offset"]
+        declared_width = primary_glyphdata["advance_width"]
+      else:
+        y_offset = None
+        declared_width = None
+
+      # ----- format nicely -----
+      note_lines.append(f"[NOTE] height: {real_height}px (declared max: {declared_height}) width: {real_width}px (advance: {declared_width})")
+      note_lines.append(f"     y_offset: {y_offset}                  x_offset: {x_offset}")
+
+      # ----- inject at TOP of errors -----
+      errors = note_lines + errors
+
     # ----- severity counting -----
     char_error_count = 0
     char_warning_count = 0
     char_info_count = 0
+    char_note_count = 0
 
     for msg in errors:
       if msg.startswith("[ERROR]"):
@@ -923,6 +959,8 @@ def parse_font_file(filename, dict_btmp_gdat):
       elif msg.startswith("[INFO]"):
         char_info_count += 1
         total_info += 1
+      elif msg.startswith("[NOTE]"):
+        char_note_count += 1
 
     if char_critical:
       total_critical += 1
@@ -964,7 +1002,8 @@ def parse_font_file(filename, dict_btmp_gdat):
       "errors": errors,
       "error_count": char_error_count,
       "warning_count": char_warning_count,
-      "info_count": char_info_count
+      "info_count": char_info_count,
+      "note_count": char_note_count
     })
 
     if errors:
@@ -1240,9 +1279,9 @@ def inner_core_critical_hit(img_mode):
 
   dict_btmp_gdat = None
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Fragmented checksum payload assembly
-  # --------------------------------------------
+  # ---------------------------------------------
   fragments = [
     0x444f4e27, 0x54204d45, 0x53530a57,
     0x49544820, 0x474c5950, 0x48592773,
@@ -1302,9 +1341,9 @@ def inner_core_critical_hit(img_mode):
   draw = ImageDraw.Draw(img)
   rng = random.Random(1337)
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Borders and circle geometry
-  # --------------------------------------------
+  # ---------------------------------------------
   BORDERS = OUTER_WHITE_BORDER + INNER_BLACK_BORDER
   if BORDERS < 2:
     BORDERS = 2
@@ -1320,18 +1359,18 @@ def inner_core_critical_hit(img_mode):
   outer_radius = min(render_width, render_height) // 2
   inner_radius = outer_radius - 4  # change gap between red rings
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Darkening veil
-  # --------------------------------------------
+  # ---------------------------------------------
   SHOW_HORIZ_BASE_LINES = False
   veil_layer = img.copy().convert("RGBA")
   veil_draw = ImageDraw.Draw(veil_layer)
   veil_draw.rectangle([0, 0, img.width, img.height], fill=(0, 0, 0, 120))
   img.paste(veil_layer, (0, 0), veil_layer)
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Central ignition glow
-  # --------------------------------------------
+  # ---------------------------------------------
   glow_radii = [120, 80, 40]
   for r in glow_radii:
     glow_layer = img.copy().convert("RGBA")
@@ -1346,9 +1385,9 @@ def inner_core_critical_hit(img_mode):
     )
     img.paste(glow_layer, (0, 0), glow_layer)
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Lightning arcs
-  # --------------------------------------------
+  # ---------------------------------------------
   arc_count = 12
   for i in range(arc_count):
     angle = (2 * math.pi / arc_count) * i
@@ -1365,19 +1404,19 @@ def inner_core_critical_hit(img_mode):
         points.append((x, y))
     if len(points) > 1:
       if USE_ENHANCED_LIGHTNING:
-        # outer electric glow
+        # ----- outer electric glow -----
         draw.line(points, fill=(90,140,255,90), width=5)
-        # core arc
+        # ----- core arc -----
         draw.line(points, fill=(80,120,255,200), width=3)
-        # bright plasma center
+        # ----- bright plasma center -----
         draw.line(points, fill=(240,250,255), width=1)
       else:
         draw.line(points, fill=(80,120,255), width=3)
         draw.line(points, fill=(220,240,255), width=1)
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Shock outer ring
-  # --------------------------------------------
+  # ---------------------------------------------
   ring_layer = img.copy().convert("RGBA")
   ring_draw = ImageDraw.Draw(ring_layer)
   ring_draw.ellipse(
@@ -1388,9 +1427,9 @@ def inner_core_critical_hit(img_mode):
     outline=(90, 0, 20, 200), width=2) # dark red
   img.paste(ring_layer, (0, 0), ring_layer)
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Shock inner ring
-  # --------------------------------------------
+  # ---------------------------------------------
   ring_layer = img.copy().convert("RGBA")
   ring_draw = ImageDraw.Draw(ring_layer)
   ring_draw.ellipse(
@@ -1401,9 +1440,9 @@ def inner_core_critical_hit(img_mode):
     outline=(255, 40, 40, 180), width=2) # light red
   img.paste(ring_layer, (0, 0), ring_layer)
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Hyperspace streaks
-  # --------------------------------------------
+  # ---------------------------------------------
   streak_count = 24
   min_length = outer_radius + 20
   max_length = outer_radius + 80
@@ -1411,7 +1450,7 @@ def inner_core_critical_hit(img_mode):
   for i in range(streak_count):
     angle = (2 * math.pi / streak_count) * i
     start_r = outer_radius + 4
-    # compute where the ray exits the image
+    # ----- compute where the ray exits the image -----
     dx = math.cos(angle)
     dy = math.sin(angle)
     limit = max_length
@@ -1428,7 +1467,7 @@ def inner_core_critical_hit(img_mode):
     end_r = min(max_length, limit)
     total_length = end_r - start_r
     total_length = max(0, end_r - start_r)
-    # Determine if line is "long"
+    # ----- Determine if line is "long" -----
     if total_length > (max_length - min_length) * 0.6:
       gap_count = rng.choice([1, 2])
       segments = gap_count + 1
@@ -1441,11 +1480,11 @@ def inner_core_critical_hit(img_mode):
         x2 = center_x + math.cos(angle) * seg_end
         y2 = center_y + math.sin(angle) * seg_end
         if USE_ENHANCED_HYPERSPACE:
-          # outer glow
+          # ----- outer glow -----
           draw.line([(x1, y1), (x2, y2)], fill=(120,160,255,70), width=5)
-          # mid glow
+          # ----- mid glow -----
           draw.line([(x1, y1), (x2, y2)], fill=(150,190,255,120), width=3)
-          # core streak
+          # ----- core streak -----
           draw.line([(x1, y1), (x2, y2)], fill=(220,240,255), width=1)
         else:
           draw.line([(x1, y1), (x2, y2)], fill=(180, 200, 255), width=2)
@@ -1455,27 +1494,27 @@ def inner_core_critical_hit(img_mode):
       x2 = center_x + math.cos(angle) * end_r
       y2 = center_y + math.sin(angle) * end_r
       if USE_ENHANCED_HYPERSPACE:
-        # outer glow
+        # ----- outer glow -----
         draw.line([(x1, y1), (x2, y2)], fill=(120,160,255,70), width=5)
-        # mid glow
+        # ----- mid glow -----
         draw.line([(x1, y1), (x2, y2)], fill=(150,190,255,120), width=3)
-        # core streak
+        # ----- core streak -----
         draw.line([(x1, y1), (x2, y2)], fill=(220,240,255), width=1)
       else:
         draw.line([(x1, y1), (x2, y2)], fill=(180, 200, 255), width=2)
 
-  # --------------------------------------------
+  # ---------------------------------------------
   # Payload delivery
-  # --------------------------------------------
+  # ---------------------------------------------
   padding = 6
   _, _, _, font_path_used = load_label_font()
 
-  # Decide whether we can scale
+  # ----- Decide whether we can scale -----
   if font_path_used != "PIL default":
-    # start with a test size
+    # ----- start with a test size -----
     test_size = 100
     font = ImageFont.truetype(font_path_used, test_size)
-    # find the widest line
+    # ----- find the widest line -----
     longest = max(lines, key=lambda s: font.getbbox(s)[2])
     bbox = font.getbbox(longest)
     test_width = bbox[2] - bbox[0]
@@ -1500,20 +1539,20 @@ def inner_core_critical_hit(img_mode):
   for i, line in enumerate(lines):
     text_x = center_x - line_widths[i] // 2
 
-    # --- energy glow layer ---
+    # ----- energy glow layer -----
     text_layer = img.copy().convert("RGBA")
     text_draw = ImageDraw.Draw(text_layer)
     if FUZZY_TEXT:
-      # outer soft glow
+      # ----- outer soft glow -----
       for dx, dy in [(-2,0),(2,0),(0,-2),(0,2)]:
         text_draw.text((text_x+dx, current_y+dy), line, fill=(255,40,40,80), font=font)
-      # inner glow
+      # ----- inner glow -----
       for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
         text_draw.text((text_x+dx, current_y+dy), line, fill=(255,40,40,140), font=font)
-      # main text
+      # ----- main text -----
       text_draw.text((text_x, current_y), line, fill=(255,40,40,220), font=font)
     else:
-      # bold main text only
+      # ----- bold main text only -----
       for dx, dy in [(0,0),(1,0),(0,1),(1,1)]:
         text_draw.text((text_x+dx, current_y+dy), line, fill=(255,40,40,180), font=font)
 
@@ -1563,9 +1602,9 @@ def apply_flips(bitmap):
   Returns:
     Transformed bitmap.
   """
-  if FLIP_HORIZ:
+  if FLIP_LEFT_RIGHT:
     bitmap = [row[::-1] for row in bitmap]
-  if FLIP_VERT:
+  if FLIP_TOP_BOTTOM:
     bitmap = bitmap[::-1]
   return bitmap
 
@@ -1590,7 +1629,7 @@ def apply_rotation(bitmap):
     return [list(row) for row in zip(*bitmap)][::-1]
   if ROTATION == 180:
     return [row[::-1] for row in bitmap[::-1]]
-  raise ValueError("Invalid ROTATION value, must be 0, 90, -90, 180, or 270")
+  raise ValueError("\n  Invalid ROTATION value, must be 0, 90, -90, 180, or 270")
 
 # ==================================================
 # MAIN RENDERING ENGINE / DRAWING LOOP / 4 PHASES
@@ -1866,9 +1905,7 @@ def preprocess_glyphs(glyph_records):
         "advance_width": advance_width,
         "ascii_code": ascii_code,
         "is_first_duplicate": (index == 0),
-        "is_commented": (
-          bitmap_version and bitmap_version["is_commented"]
-        ),
+        "is_commented": (bitmap_version and bitmap_version["is_commented"]),
         "status_flags": glyph["status_flags"]
       })
 
@@ -1953,7 +1990,7 @@ def build_lines(processed):
     should_wrap = False
 
     if RENDER_MODE == "table":
-      # Always wrap in table mode
+      # ----- Always wrap in table mode -----
       if current_line and current_width + glyph_advance > DISPLAY_WIDTH:
         should_wrap = True
 
@@ -2058,9 +2095,12 @@ def compute_layout(lines, spacing, add_spacing_after_last):
     descent_positions.append(total_height - 1)
 
   # --------------------------------------------------
-  # Enforce minimum height
+  # Enforce minimum/maximum height
   # --------------------------------------------------
-  total_height = max(total_height, DISPLAY_HEIGHT)
+  if DISPLAY_HEIGHT_HARD_LIMIT and (RENDER_MODE == "text" or RENDER_MODE == "random"):
+    total_height = DISPLAY_HEIGHT
+  else:
+    total_height = max(total_height, DISPLAY_HEIGHT)
   return (
     rendered_lines,
     total_height,
@@ -2091,10 +2131,21 @@ def render_glyphs(glyph_records, average_width):
     Final rendered image.
   """
 
-  # -------------------------------
+  # ------------------------------
   # PHASE 1 — PREPROCESS
-  # -------------------------------
+  # ------------------------------
   processed = preprocess_glyphs(glyph_records)
+
+  glyph_draw_index = {}
+  glyph_total_count = {}
+
+  for glyph in processed:
+    ascii_code = glyph["ascii_code"]
+
+    if ascii_code not in glyph_total_count:
+      glyph_total_count[ascii_code] = 0
+
+    glyph_total_count[ascii_code] += 1
 
   any_duplicates = any(
     glyph["status_flags"]["duplicate_bitmap"] or
@@ -2102,24 +2153,24 @@ def render_glyphs(glyph_records, average_width):
     for glyph in processed
   )
 
-  # -------------------------------
+  # ------------------------------
   # PHASE 2 — LINE BUILDING
-  # -------------------------------
+  # ------------------------------
   lines = build_lines(processed)
 
-  # -------------------------------
+  # ------------------------------
   # PHASE 3 — LAYOUT COMPUTATION
-  # -------------------------------
-  # --------------------------------
+  # ------------------------------
+  # ------------------------------
   # Load label font early (needed for spacing logic)
-  # --------------------------------
+  # ------------------------------
   label_font = None
   font_height = 0
 
   if SHOW_LABEL and RENDER_MODE == "table":
     label_font, font_height, _, _ = load_label_font()
 
-    required_scaled = font_height + 8 + 16
+    required_scaled = font_height + 8 + 16 # 8 + 16 for label padding
     required_unscaled = (required_scaled + SCALE - 1) // SCALE
     effective_spacing = max(SPACING, required_unscaled)
   else:
@@ -2139,15 +2190,19 @@ def render_glyphs(glyph_records, average_width):
     add_spacing_after_last
   )
 
-  # -------------------------------
+  # ------------------------------
   # PHASE 4 — DRAWING ENGINE
-  # -------------------------------
+  # ------------------------------
   global DISPLAY_WIDTH
   if DISPLAY_WIDTH < 32:
     DISPLAY_WIDTH = 32
     report_geometry_correction()
 
   global WHITE, GREY, RED, ORANGE, YELLOW, BLACK, PURPLE
+
+  global LABEL_START
+  if LABEL_START not in (0, 1):
+    LABEL_START = 1
 
   if BLACK_AND_WHITE_ONLY:
     if INVERT_BLACK_AND_WHITE:
@@ -2298,7 +2353,7 @@ def render_glyphs(glyph_records, average_width):
       # --------------------------------------------------
       if SHOW_LABEL and RENDER_MODE == "table" and not BLACK_AND_WHITE_ONLY:
 
-        # ----- Determine label color (match glyph logic except for duplicates) -----
+        # ----- Determine label color (match glyph logic except for active duplicates) -----
         if glyph.get("is_commented", False):
           label_color = GREY
         elif glyph["status_flags"]["duplicate_bitmap"] or glyph["status_flags"]["duplicate_glyphdata"]:
@@ -2315,24 +2370,57 @@ def render_glyphs(glyph_records, average_width):
         glyph_center = x_cursor + glyph_width // 2
         descent_line = y_cursor + line["height"] - 1
 
+        ascii_code = glyph["ascii_code"]
+
+        if ascii_code == 32:
+          base_char = "sp"
+        elif ascii_code is not None:
+          base_char = chr(ascii_code)
+        else:
+          base_char = "?"
+
+        total = glyph_total_count.get(ascii_code, 1)
+        if LABEL_NUMBERING and total > 1:
+          # ----- initialize draw index -----
+          if ascii_code not in glyph_draw_index:
+
+            if LABEL_INCREMENT:
+              glyph_draw_index[ascii_code] = LABEL_START - 1
+            else: # LABEL "DECREMENT"
+              # ----- start one step ABOVE the first value so first decrement lands correctly -----
+              glyph_draw_index[ascii_code] = total + LABEL_START
+
+          # ----- update index depending on mode -----
+          if LABEL_INCREMENT:
+            glyph_draw_index[ascii_code] += 1
+          else:
+            glyph_draw_index[ascii_code] -= 1
+
+          current_index = glyph_draw_index[ascii_code]
+          # ----- final label -----
+          label_char = f"{base_char}-{current_index}"
+        else:
+          label_char = base_char
+
         label_entries.append({
           "char": chr(glyph["ascii_code"]) if glyph["ascii_code"] is not None else "?",
+          "label":label_char,
           "center_x_unscaled": glyph_center,
           "descent_y_unscaled": descent_line,
           "color": label_color
         })
 
-      # ------------------------------------------
+      # ----------------------------------------
       # Show advance position
-      # ------------------------------------------
+      # ----------------------------------------
       if SHOW_GLYPH_ORIGIN: # and RENDER_MODE == "table":
         for yy in range(y_cursor, y_cursor + line["height"]):
           if 0 <= x_cursor < DISPLAY_WIDTH:
             img.putpixel((x_cursor, yy), PURPLE)
 
-      # ------------------------------------------
+      # ----------------------------------------
       # Advance cursor
-      # ------------------------------------------
+      # ----------------------------------------
       advance = get_glyph_advance(glyph)
       x_cursor += advance
 
@@ -3125,12 +3213,8 @@ def add_borders_and_scale(
       """
       # Keep this for diagnostic when changing columns geometry, commented to avoid unnecessary visual pollution.
       print("debug LEGEND AREA INNER HEIGHT:", legend_height_unscaled, " (before scaling)")
-      print(
-        "debug LEGEND AREA INNER HEIGHT:",
-        legend_height_unscaled * SCALE, " = ",
-        legend_height_unscaled, " * ",SCALE ,
-        " computed (what is should be after scaling)"
-      )
+      print("debug LEGEND AREA INNER HEIGHT:", legend_height_unscaled * SCALE, " = ",
+        legend_height_unscaled, " * ",SCALE , " computed (what is should be after scaling)")
       """
 
     legend_img = Image.new("RGB", (bordered.width, new_height), BLACK)
@@ -3188,9 +3272,9 @@ def add_borders_and_scale(
   # ==================================================
   if SHOW_LEGEND and DISPLAY_DIAGNOSTIC and not ( RENDER_MODE == "random" or RENDER_MODE == "this" ):
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Scaled geometry
-    # ------------------------------------------
+    # ----------------------------------------
     outer_scaled_border = OUTER_WHITE_BORDER * SCALE
     inner_scaled_border = INNER_BLACK_BORDER * SCALE
     inner_left   = outer_scaled_border
@@ -3200,9 +3284,9 @@ def add_borders_and_scale(
     inner_width  = inner_right - inner_left
     inner_height = inner_bottom - inner_top
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Measure blocks
-    # ------------------------------------------
+    # ----------------------------------------
     left = measure_left_block(font,labels_left,title_left)
     right = measure_right_block(font,labels_right,title_right)
 
@@ -3214,7 +3298,7 @@ def add_borders_and_scale(
     else:
       primary_width = right["width"]
 
-    # Minimum scale needed for legend to fit
+    # ----- Minimum scale needed for legend to fit -----
     usable_width_unscaled = bordered.width - 2 * (OUTER_WHITE_BORDER + INNER_BLACK_BORDER)
 
     if usable_width_unscaled <= 0:
@@ -3232,7 +3316,6 @@ def add_borders_and_scale(
     if primary_width > inner_width:
 
       words = ["Increase", "SCALING", f"to {min_scale}", "to see", "legend"]
-
       LINE_SPACING = 6
 
       # ----- Measure total height -----
@@ -3267,9 +3350,9 @@ def add_borders_and_scale(
 
       return scaled
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Layout
-    # ------------------------------------------
+    # ----------------------------------------
     layout = layout_legend_blocks(
       left,
       right,
@@ -3319,7 +3402,7 @@ def add_borders_and_scale(
             if 0 <= px < scaled.width and 0 <= py < scaled.height:
               scaled.putpixel((px, py), tick_colors[i])
 
-        # ----- Line ----
+        # ----- Line -----
         for dx in range(left["line_length"]):
           px = x_line + dx
           if 0 <= px < scaled.width and 0 <= row_center < scaled.height:
@@ -3414,7 +3497,8 @@ def add_borders_and_scale(
 
       center_x_scaled = entry["center_x_unscaled"] * SCALE + scaled_borders
       descent_scaled = entry["descent_y_unscaled"] * SCALE + scaled_borders
-      bbox = font.getbbox(entry["char"])
+      label_text = entry.get("label", entry["char"])
+      bbox = font.getbbox(label_text)
       text_width = bbox[2] - bbox[0]
       text_height = bbox[3] - bbox[1]
       label_x = center_x_scaled - text_width // 2
@@ -3424,7 +3508,7 @@ def add_borders_and_scale(
       if 0 <= label_y < scaled.height:
         draw.text(
           (label_x, label_y),
-          entry["char"],
+          label_text,
           fill=entry["color"],
           font=font
         )
@@ -3438,9 +3522,9 @@ def add_borders_and_scale(
 
     TTF_DISTANCE = 4
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Determine side
-    # ------------------------------------------
+    # ----------------------------------------
     if show_left and show_right:
       draw_side = "left" if left["height"] < right["height"] else "right"
     elif show_left:
@@ -3448,9 +3532,9 @@ def add_borders_and_scale(
     else:
       draw_side = "left"
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Build debug string
-    # ------------------------------------------
+    # ----------------------------------------
     if draw_side == "left":
       ttf_debug = (
         f"TTF: {font_path_used}, "
@@ -3464,24 +3548,24 @@ def add_borders_and_scale(
         f"TTF: {font_path_used}"
       )
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Measure text
-    # ------------------------------------------
+    # ----------------------------------------
     bbox = font.getbbox(ttf_debug)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Width rule
-    # ------------------------------------------
+    # ----------------------------------------
     if show_left and show_right:
       max_width = scaled.width // 2 - TTF_DISTANCE - OUTER_WHITE_BORDER * SCALE
     else:
       max_width = scaled.width - TTF_DISTANCE * 2 - OUTER_WHITE_BORDER  * SCALE * 2
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Clip if needed
-    # ------------------------------------------
+    # ----------------------------------------
     if text_w > max_width:
       if draw_side == "left":
         clipped = ttf_debug
@@ -3504,14 +3588,14 @@ def add_borders_and_scale(
       text_w = bbox[2] - bbox[0]
       text_h = bbox[3] - bbox[1]
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Vertical limit
-    # ------------------------------------------
+    # ----------------------------------------
     top = scaled.height - OUTER_WHITE_BORDER * SCALE - TTF_DISTANCE - text_h
 
-    # ------------------------------------------
+    # ----------------------------------------
     # Final placement
-    # ------------------------------------------
+    # ----------------------------------------
     if draw_side == "left":
       x = OUTER_WHITE_BORDER * SCALE + TTF_DISTANCE
     else:
@@ -3728,18 +3812,20 @@ def write_report_file(
       # --------------------------------------------------
       # DEVELOPER DEBUG SECTION
       # --------------------------------------------------
+      #f.write("===================== DEVELOPER DEBUG DATA: ==================\n\n")
+      f.write("=" * 20 + " DEVELOPER DEBUG DATA: " + "=" * 19 + "\n\n")
+      f.write("\n")
+      f.write("  Generated with GLYPHY version 56\n")
       if ENABLE_DEVELOPER_DEBUG_MODE:
-        #f.write("===================== DEVELOPER DEBUG DATA: ==================\n\n")
-        f.write("=" * 20 + " DEVELOPER DEBUG DATA: " + "=" * 19 + "\n\n")
         from datetime import datetime
         now = datetime.now()
 
-        f.write("Generated with GLYPHY version 54\n")
         f.write("\n")
-        f.write(f"debug System date: {now.strftime('%Y - %m_%b - %d')}\n")
-        f.write(f"debug System time: {now.strftime('%H:%M:%S')}\n")
+        f.write(f"  debug System date: {now.strftime('%Y - %m_%b - %d')}\n")
+        f.write(f"  debug System time: {now.strftime('%H:%M:%S')}\n")
 
         if SHOW_LABEL or SHOW_LEGEND:
+          f.write("\n")
           f.write(f"debug TTF font used: {font_path}\n")
           f.write(f"debug TTF Font size: {font_size}\n")
           f.write(f"debug TTF Font height: {font_height}px\n")
@@ -4056,9 +4142,9 @@ def run_repair_menu(font_file, ctx):
 
   for line_index, line in enumerate(lines):
 
-    # -----------------------------------------------
+    # ---------------------------------------------
     # 1. UINT FIX (uses parser ctx)
-    # -----------------------------------------------
+    # ---------------------------------------------
     if choice == "1":
       bitmap_match = bitmap_pattern.search(line)
       if bitmap_match:
@@ -4073,9 +4159,9 @@ def run_repair_menu(font_file, ctx):
             uint_fixes += 1
             break
 
-    # -----------------------------------------------
+    # ---------------------------------------------
     # 2. BITMAP COMMENT FIX
-    # -----------------------------------------------
+    # ---------------------------------------------
     elif choice == "2":
       bitmap_match = bitmap_pattern.search(line)
       if bitmap_match:
@@ -4097,9 +4183,9 @@ def run_repair_menu(font_file, ctx):
           fixed_lines.extend(lines[line_index+1:])
           break
 
-    # -----------------------------------------------
+    # ---------------------------------------------
     # 3. FIX MISSING '0b' & 'UL'
-    # -----------------------------------------------
+    # ---------------------------------------------
     elif choice == "3":
       if re.search(r'\b[01]{3,}\b', line):
         parts = line.split(",")
@@ -4108,7 +4194,7 @@ def run_repair_menu(font_file, ctx):
           token = part.strip()
           if not token:
             continue
-          # Extract only binary digits
+          # ----- Extract only binary digits -----
           binary_digits = "".join(re.findall(r'[01]+', token))
           if not binary_digits:
             continue
@@ -4116,7 +4202,7 @@ def run_repair_menu(font_file, ctx):
           if f"0b{binary_digits}UL" != token:
             binary_repairs += 1
         if rebuilt:
-          # Prepare final line with 2-space indentation
+          # ----- Prepare final line with 2-space indentation -----
           indented_line = "  "  # 2 spaces
           if len(rebuilt) == 1:
             indented_line += rebuilt[0] + "\n"
@@ -4124,9 +4210,9 @@ def run_repair_menu(font_file, ctx):
             indented_line += (", ".join(rebuilt[:-1]) + ", " + rebuilt[-1] + "\n")
           line = indented_line
 
-    # -----------------------------------------------
+    # ---------------------------------------------
     # 5. FIX MISSING 'pt7b'
-    # -----------------------------------------------
+    # ---------------------------------------------
     elif choice == "5":
       print("\n  Glyphy will not automate this repair.")
       print("  Reason: I am not sure if this is even needed for ProffieOS?")
@@ -4140,18 +4226,18 @@ def run_repair_menu(font_file, ctx):
       pt7b_additions += 0
       break
 
-    # -----------------------------------------------
+    # ---------------------------------------------
     # END OF FIRST PASS : BITMAP ARRAYS
-    # -----------------------------------------------
+    # ---------------------------------------------
     fixed_lines.append(line)
 
   # ==================================================
   # SECOND PASS : GLYPHDATA
   # ==================================================
 
-  # -----------------------------------------------
+  # ---------------------------------------------
   # 2. GLYPHDATA COMMENT FIX
-  # -----------------------------------------------
+  # ---------------------------------------------
   if choice == "2":
     new_lines = []
     for line_index, line in enumerate(fixed_lines):
@@ -4177,10 +4263,9 @@ def run_repair_menu(font_file, ctx):
       new_lines.append(line)
     fixed_lines = new_lines
 
-  # -----------------------------------------------
+  # ---------------------------------------------
   # 4. FIX MISSING GLYPHs (uses parser ctx) (bitmap array & GLYPHDATA)
-  # -----------------------------------------------
-
+  # ---------------------------------------------
   elif choice == "4":
 
     existing_bitmaps = set(ctx["bitmap_dict"].keys())

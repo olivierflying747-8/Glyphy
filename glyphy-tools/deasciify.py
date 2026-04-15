@@ -8,6 +8,7 @@ python deasciify.py
 # deasciify.py
 # Convert ASCII back + rotate CW (derotate)
 
+import re
 import os
 import platform
 import subprocess
@@ -37,77 +38,130 @@ def read_grid(file_path):
   with open(file_path, "r", encoding="utf-8") as input_file:
     lines = [line.rstrip("\n") for line in input_file]
 
-  # ----- remove empty lines -----
-  lines = [line for line in lines if line.strip()]
-
-  # ----- re-pad to rectangle -----
-  max_line_length = max(len(line) for line in lines)
-
-  grid = []
-  for line in lines:
-    padded = line.ljust(max_line_length, " ")
-    grid.append(list(padded))
-
-  return grid
-
+  # ----- DO NOT remove anything — keep structure intact -----
+  return [list(line) for line in lines]
 
 def deasciify(grid):
-  result = []
+  """
+  Convert visual ASCII grid into binary grid (still as list of lists).
+  Keeps structure intact.
+  """
+  binary_grid = []
 
   for row in grid:
-    new_row = []
+    binary_row = []
+
     for character in row:
       if character == "█":
-        new_row.append("1")
+        binary_row.append("1")
       elif character == " ":
-        new_row.append("0")
+        binary_row.append("0")
       else:
-        new_row.append(character)
-    result.append(new_row)
+        binary_row.append(character)  # keep 0b / UL / anything else
 
-  return result
+    binary_grid.append(binary_row)
 
-def rotate_cw(grid):
+  return binary_grid
+
+def pad_grid(grid):
+  """
+  Pad all rows to equal length using '0'
+  """
+  max_width = max(len(row) for row in grid)
+
+  padded_grid = []
+  for row in grid:
+    padded_row = row + ["0"] * (max_width - len(row))
+    padded_grid.append(padded_row)
+
+  return padded_grid
+
+def derotate_grid(grid):  # rotate CW
+  """
+  Rotate clockwise (reverse of asciify rotation)
+  """
   height = len(grid)
   width = len(grid[0])
 
-  rotated = []
+  rotated_grid = []
+
   for column_index in range(width):
     new_row = []
     for row_index in range(height - 1, -1, -1):
       new_row.append(grid[row_index][column_index])
-    rotated.append(new_row)
 
-  return rotated
+    rotated_grid.append(new_row)
+
+  return rotated_grid
+
+def measure_glyph(grid):
+  """
+  Measure width and height from binary grid
+  """
+
+  # width = number of rows (columns in bitmap)
+  glyph_width = len(grid)
+
+  if not grid:
+    return 0, 0
+
+  # reconstruct first line as string
+  first_row_string = "".join(grid[0]).strip().rstrip(",")
+
+  # remove prefix/suffix if present
+  if first_row_string.startswith("0b"):
+    first_row_string = first_row_string[2:]
+
+  if first_row_string.endswith("UL"):
+    first_row_string = first_row_string[:-2]
+
+  # height = number of bits
+  glyph_height = sum(1 for character in first_row_string if character in ("0", "1"))
+
+  return glyph_width, glyph_height
 
 def write_output(grid):
-  with open("deasciified.txt", "w", encoding="utf-8") as output_file:
-    for row_index, row in enumerate(grid):
-      line = "".join(row).rstrip()
+  """
+  Convert grid rows into '0b...UL' strings
+  Final formatting + metadata
+  """
+  output_lines = []
 
-      if row_index == len(grid) - 1:
-        output_file.write("  " + line + "\n")
-      else:
-        output_file.write("  " + line + ",\n")
+  for row in grid:
+    line = "".join(row).strip()
 
-    # ----- determine height from bit length -----
-    if grid:
-      glyph_height = len(grid[0])
-    else:
-      glyph_height = 0
+    # remove existing prefix/suffix if present
+    if not line.startswith("0b"):
+      line = "0b" + line
+    if not line.endswith("UL"):
+      line = line + "UL"
 
-    glyph_width = len(grid)
+    output_lines.append(line)
+
+  glyph_width, glyph_height = measure_glyph(grid)
 
     # ----- determine uintXX_t required -----
-    if glyph_height <= 8:
-      required = 8
-    elif glyph_height <= 16:
-      required = 16
-    else:
-      required = 32
+  if glyph_height <= 8:
+    required_uint = 8
+  elif glyph_height <= 16:
+    required_uint = 16
+  elif glyph_height <= 32:
+    required_uint = 32
+  else:
+    required_uint = glyph_height
+
+  with open("deasciified.txt", "w", encoding="utf-8") as output_file:
+
+    for line_index, line_text in enumerate(output_lines):
+      if line_index < len(output_lines) - 1:
+        output_file.write(f"  {line_text},\n")
+      else:
+        output_file.write(f"  {line_text}\n")
 
     output_file.write("\n")
-    output_file.write(f"  uint{required}_t\n")
+    output_file.write(f"  uint{required_uint}_t\n")
+    if required_uint > 32:
+      output_file.write("    WARNING height is greater than 32px, it will not fit on standard OLED 128x32.\n")
     output_file.write(f"\n  Glyph height: {glyph_height}")
     output_file.write(f"\n  Glyph width: {glyph_width}")
 
@@ -118,8 +172,9 @@ def main():
     return
 
   binary_grid = deasciify(grid)
-  rotated = rotate_cw(binary_grid)
-  write_output(rotated)
+  padded_grid = pad_grid(binary_grid)
+  derotated_grid = derotate_grid(padded_grid)
+  write_output(derotated_grid)
 
   print("\n  De-asciified & derotated output written to deasciified.txt\n")
   print("\n                                                           MTFBWY")
