@@ -19,7 +19,7 @@ Note:<br>
 - The input bitmap must be rectangular
 <br>
 <br>
-<br>
+
 # fontconvert.py is identical to ProffieOS/fontconvert/fontconvert.c
 fontconvert.py will convert a TTF to a .h ProffieOS font
 
@@ -27,7 +27,7 @@ Usage:<br>
 - Run: python fontconvert.py YourFont.ttf 10 > YourFont.h
 <br>
 <br>
-<br>
+
 # rotate_flips.py allows to rotate and/or flip a ProffieOS bitmap
 
 Usage:<br>
