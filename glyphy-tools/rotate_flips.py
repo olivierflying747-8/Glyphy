@@ -154,7 +154,7 @@ def main():
 
   print("\n  Rotated output written to rotated_flipped.txt\n")
 
-  open_file("rotated_deg.txt")
+  open_file("rotated_flipped.txt")
 
 if __name__ == "__main__":
   main()
